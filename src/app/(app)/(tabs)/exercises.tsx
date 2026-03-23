@@ -1,12 +1,12 @@
 import {
   Text,
-  SafeAreaView,
   View,
   TextInput,
   TouchableOpacity,
   FlatList,
   RefreshControl,
-  Platform
+  Platform,
+  StatusBar
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useState } from 'react';
@@ -15,6 +15,7 @@ import { client } from '@/lib/sanity/client';
 import { defineQuery } from 'groq';
 import { Exercise } from '@/lib/sanity/types'
 import ExerciseCard from '@/app/components/ExerciseCard';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Define the query outside the component for proper type generation
 export const exercisesQuery = defineQuery(`*[_type == "exercise" && isActive == true] | order(name asc) {
@@ -64,7 +65,8 @@ function Exercises() {
 
 
   return (
-    <SafeAreaView className="flex-1 bg-gray-50">
+    <SafeAreaView className="flex flex-1 bg-white">
+      <StatusBar barStyle="dark-content" />
       {/* Header */}
       <View className="px-6 py-4 bg-white border-b border-gray-200">
         <Text className="text-2xl font-bold text-gray-900">

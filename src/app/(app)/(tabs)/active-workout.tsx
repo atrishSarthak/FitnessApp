@@ -1,4 +1,15 @@
-import { Text, View, StatusBar, Platform, TouchableOpacity, Alert, KeyboardAvoidingView, ScrollView, TextInput } from 'react-native'
+import {
+    Text,
+    View,
+    StatusBar,
+    Platform,
+    TouchableOpacity,
+    Alert,
+    KeyboardAvoidingView,
+    ScrollView,
+    TextInput,
+    ActivityIndicator
+} from 'react-native'
 import { useStopwatch } from 'react-timer-hook';
 import { useWorkoutStore } from '../../../../store/workout-store';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -6,9 +17,23 @@ import React from 'react';
 import Ionicons from "@expo/vector-icons/Ionicons";
 import ExerciseSelectionModal from '@/app/components/ExerciseSelectionModal';
 import { WorkoutSet } from 'store/workout-store';
+import { useState } from 'react';
+import { client } from '@/lib/sanity/client';
+import { defineQuery } from 'groq';
+import { useUser } from '@clerk/expo';
+import { WorkoutData } from '@/app/api/save-workout+api';
+
+// Query to find exercise by name
+export const findExerciseQuery =
+    defineQuery(`*[_type == "exercise" && name == $name][0] {
+    _id,
+    name
+  }`);
 
 export default function ActiveWorkout() {
-    const [showExerciseSelection, setShowExerciseSelection] = React.useState(false);
+    const { user } = useUser();
+    const [showExerciseSelection, setShowExerciseSelection] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
 
     const {
         weightUnit,
@@ -56,11 +81,123 @@ export default function ActiveWorkout() {
         );
     };
 
+    const saveWorkoutToDatabase = async () => {
+        if (isSaving) return false;
+        setIsSaving(true);
+
+        try {
+            // Use stopwatch total seconds for duration
+            const durationInSeconds = totalSeconds;
+
+            // Transform exercises data to match Sanity schema
+            const exercisesForSanity = [];
+            
+            for (const exercise of workoutExercises) {
+                // Find the exercise document in Sanity by name
+                const exerciseDoc = await client.fetch(findExerciseQuery, {
+                    name: exercise.name,
+                });
+
+                if (!exerciseDoc) {
+                    throw new Error(
+                        `Exercise "${exercise.name}" not found in database`
+                    );
+                }
+
+                // Transform sets to match schema (only completed sets, convert to numbers)
+                const setsForSanity = [];
+                for (const set of exercise.sets) {
+                    if (set.isCompleted && set.reps && set.weight) {
+                        setsForSanity.push({
+                            _type: "set" as const,
+                            _key: Math.random().toString(36).substr(2, 9),
+                            reps: parseInt(set.reps, 10) || 0,
+                            weight: parseFloat(set.weight) || 0,
+                            weightUnit: set.weightUnit,
+                        });
+                    }
+                }
+
+                exercisesForSanity.push({
+                    _type: "workoutExercise" as const,
+                    _key: Math.random().toString(36).substr(2, 9),
+                    exercise: {
+                        _type: "reference" as const,
+                        _ref: exerciseDoc._id,
+                    },
+                    sets: setsForSanity,
+                });
+            }
+
+            const validExercises = exercisesForSanity.filter(
+                (exercise) => exercise.sets.length > 0
+            );
+
+            if (validExercises.length === 0) {
+                Alert.alert("No Completed Sets", "Please complete at least one set before saving.");
+                return false;
+            }
+
+            const workoutData: WorkoutData = {
+                _type: "workout",
+                userId: user.id,
+                date: new Date().toISOString(),
+                duration: durationInSeconds,
+                exercises: validExercises,
+            };
+
+            // Save to Sanity via API
+            const result = await fetch("/api/save-workout", {
+                method: "POST",
+                body: JSON.stringify({ workoutData }),
+            });
+
+            console.log("Workout saved successfully!", result);
+            return true;
+
+        } catch (error) {
+            console.error("Error saving workout:", error);
+            Alert.alert("Save Failed", "Failed to save workout. Please try again.");
+            return false;
+        } finally {
+            setIsSaving(false);
+        }
+    }
+
+
+    const endWorkout = async () => {
+        const saved = await saveWorkoutToDatabase();
+
+        if (saved) {
+            Alert.alert("Workout Saved", "Your workout has been saved successfully!");
+            // Reset the workout
+            resetWorkout();
+
+            router.replace("/(app)/(tabs)/history?refresh=true");
+        }
+    };
+
+    const saveWorkout = () => {
+        // are you sure you want to complete the workout?
+        Alert.alert(
+            "Complete Workout",
+            "Are you sure you want to complete the workout?",
+            [
+                { text: "Cancel", style: "cancel" },
+                { text: "Complete", onPress: async () => await endWorkout() },
+            ]
+        );
+    };
+
     const addExercise = () => {
         setShowExerciseSelection(true);
     };
 
-    const deleteExercise = (id: string) => { };
+    const deleteExercise = (id: string) => {
+        setWorkoutExercises((exercises) =>
+            exercises.filter((exercise) => exercise.id !== id)
+        );
+    };
 
     const addNewSet = (exerciseId: string) => {
         const newSet: WorkoutSet = {
@@ -80,7 +217,6 @@ export default function ActiveWorkout() {
         );
     };
 
-
     const updateSet = (
         exerciseId: string,
         setId: string,
@@ -95,6 +231,19 @@ export default function ActiveWorkout() {
                         sets: exercise.sets.map((set) =>
                             set.id === setId ? { ...set, [field]: value } : set
                         ),
+                    }
+                    : exercise
+            )
+        );
+    };
+
+    const deleteSet = (exerciseId: string, setId: string) => {
+        setWorkoutExercises((exercises) =>
+            exercises.map((exercise) =>
+                exercise.id === exerciseId
+                    ? {
+                        ...exercise,
+                        sets: exercise.sets.filter((set) => set.id !== setId),
                     }
                     : exercise
             )
@@ -117,7 +266,6 @@ export default function ActiveWorkout() {
             )
         );
     };
-
 
     return (
         <View className="flex-1">
@@ -333,6 +481,14 @@ export default function ActiveWorkout() {
                                                             color={set.isCompleted ? "white" : "#9CA3AF"}
                                                         />
                                                     </TouchableOpacity>
+
+                                                    {/* Delete Button */}
+                                                    <TouchableOpacity
+                                                        onPress={() => deleteSet(exercise.id, set.id)}
+                                                        className="w-12 h-12 rounded-xl items-center justify-center mx-1"
+                                                    >
+                                                        <Ionicons name="trash" size={20} color="#EF4444" />
+                                                    </TouchableOpacity>
                                                 </View>
                                             </View>
                                         ))
@@ -375,6 +531,40 @@ export default function ActiveWorkout() {
                                 </Text>
                             </View>
                         </TouchableOpacity>
+
+                        {/* Complete Workout Button */}
+                        <TouchableOpacity
+                            onPress={saveWorkout}
+                            className={`rounded-2xl py-4 items-center mb-8 ${isSaving ||
+                                workoutExercises.length === 0 ||
+                                workoutExercises.some((exercise) =>
+                                    exercise.sets.some((set) => !set.isCompleted)
+                                )
+                                ? "bg-gray-400"
+                                : "bg-green-600 active:bg-green-700"
+                                }`}
+                            disabled={
+                                isSaving ||
+                                workoutExercises.length === 0 ||
+                                workoutExercises.some((exercise) =>
+                                    exercise.sets.some((set) => !set.isCompleted)
+                                )
+                            }
+                        >
+                            {isSaving ? (
+                                <View className="flex-row items-center">
+                                    <ActivityIndicator size="small" color="white" />
+                                    <Text className="text-white font-semibold text-lg ml-2">
+                                        Saving...
+                                    </Text>
+                                </View>
+                            ) : (
+                                <Text className="text-white font-semibold text-lg">
+                                    Complete Workout
+                                </Text>
+                            )}
+
+                        </TouchableOpacity>
                     </ScrollView>
                 </KeyboardAvoidingView>
             </View>
@@ -384,8 +574,6 @@ export default function ActiveWorkout() {
                 visible={showExerciseSelection}
                 onClose={() => setShowExerciseSelection(false)}
             />
-
-
 
 
         </View>

@@ -1,6 +1,6 @@
 import { client } from "@/lib/sanity/client";
 import React, { useEffect, useState } from "react";
-import { Text, View, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, ScrollView } from "react-native";
+import { Text, View, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, ScrollView, StatusBar } from "react-native";
 import { defineQuery } from "groq";
 import { useUser } from "@clerk/expo";
 import { GetWorkoutsQueryResult } from "@/lib/sanity/types";
@@ -134,7 +134,8 @@ export default function HistoryPage() {
 
 
   return (
-    <SafeAreaView className="flex flex-1">
+    <SafeAreaView className="flex flex-1 bg-white">
+      <StatusBar barStyle="dark-content" />
       {/* Header */}
       <View className="px-6 py-4 bg-white border-b border-gray-200">
         <Text className="text-2xl font-bold text-gray-900">
