@@ -4,7 +4,7 @@
     "userInterfaceStyle": "automatic",
     "orientation": "default",
     "web": {
-      "output": "static"
+      "output": "server"
     },
     "plugins": [
       [
@@ -12,9 +12,16 @@
         {
           "origin": "https://n"
         }
-      ]
+      ],
+      "expo-font",
+      "@clerk/expo",
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "name": "fit-app",
-    "slug": "fit-app"
+    "slug": "fit-app",
+    "ios": {
+      "bundleIdentifier": "com.sarthak07atrish69.fit-app"
+    }
   }
 }
