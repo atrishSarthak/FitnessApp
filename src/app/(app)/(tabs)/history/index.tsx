@@ -5,7 +5,7 @@ import { defineQuery } from "groq";
 import { useUser } from "@clerk/expo";
 import { GetWorkoutsQueryResult } from "@/lib/sanity/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { formatDuration } from "../../../../../lib/utils";
+import { formatDuration } from "@/lib/utils";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 

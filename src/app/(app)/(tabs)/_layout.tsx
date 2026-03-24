@@ -2,9 +2,12 @@ import React from 'react'
 import { Tabs } from 'expo-router'
 import AntDesign from '@expo/vector-icons/AntDesign';
 import Entypo from '@expo/vector-icons/Entypo';
+import { useUser } from '@clerk/expo';
+import { Image } from 'react-native';
 
 
 function Layout() {
+    const { user } = useUser();
     return (
         <Tabs>
             <Tabs.Screen
@@ -61,20 +64,21 @@ function Layout() {
             />
 
             <Tabs.Screen
-                name="profile/index"
+                name="profile"
                 options={{
-                    headerShown: false,
                     title: "Profile",
-                    /*tabBarIcon: ({ color, size }) => (
-                        <Image
-                            source={require("../../assets/images/profile.png")}
-                            style={{ width: size, height: size, borderRadius: size / 2 }}
-                        />
-                    )*/
+                    headerShown: false,
+                    tabBarIcon: ({ color, size }) => (
+                    <Image
+                        source={{
+                        uri: user?.imageUrl ?? user?.externalAccounts[0]?.imageUrl,
+                        }}
+                        className="rounded-full"
+                        style={{ width: 28, height: 28, borderRadius: 100 }}
+                    />
+                    ),
                 }}
             />
-
-
         </Tabs>
     )
 }

@@ -65,7 +65,7 @@ function Exercises() {
 
 
   return (
-    <SafeAreaView className="flex flex-1 bg-white">
+    <SafeAreaView className="flex-1 bg-white" edges={['top']}>
       <StatusBar barStyle="dark-content" />
       {/* Header */}
       <View className="px-6 py-4 bg-white border-b border-gray-200">
@@ -102,7 +102,7 @@ function Exercises() {
         data={filteredExercises}
         keyExtractor={(item) => item._id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ padding: 24, backgroundColor: 'transparent' }}
+        contentContainerStyle={{ padding: 24, paddingBottom: 100, backgroundColor: 'transparent' }}
         style={{ backgroundColor: '#F9FAFB' }}
         renderItem={({ item }) => (
           <ExerciseCard

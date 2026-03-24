@@ -1,118 +1,318 @@
-import { Link } from "expo-router";
-import React from "react";
-import { SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { View, Text, StatusBar, ActivityIndicator, RefreshControl, TouchableOpacity, ScrollView } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
+import React from 'react'
+import { useUser } from '@clerk/expo';
+import { useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
+import { GetWorkoutsQueryResult } from '@/lib/sanity/types';
+import { client } from '@/lib/sanity/client';
+import { getWorkoutsQuery } from './profile';
+import { formatDuration } from '@/lib/utils';
+import Ionicons from "@expo/vector-icons/Ionicons";
 
-export default function Page() {
-  return (
-    <SafeAreaView style={styles.container}>
-      <Header />
-      <Content />
-    </SafeAreaView>
+export default function HomePage() {
+  const { user } = useUser();
+  const router = useRouter();
+  const [workouts, setWorkouts] = useState<GetWorkoutsQueryResult>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchWorkouts = async () => {
+    if (!user?.id) return;
+
+    try {
+      const results = await client.fetch(getWorkoutsQuery, { userId: user.id });
+      setWorkouts(results);
+    } catch (error) {
+      console.error("Error fetching workouts:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWorkouts();
+  }, [user?.id]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchWorkouts();
+  };
+
+  // Calculate stats
+  const totalWorkouts = workouts.length;
+  const lastWorkout = workouts[0];
+  const totalDuration = workouts.reduce(
+    (sum, workout) => sum + (workout.duration || 0),
+    0
   );
-}
 
-function Content() {
-  return (
-    <View style={styles.contentWrapper}>
-      <View style={styles.contentInner}>
 
-        <Text style={styles.title}>
-          Expo + Tailwind (NativeWind) Template
-        </Text>
+  const averageDuration =
+    totalWorkouts > 0 ? Math.round(totalDuration / totalWorkouts) : 0;
 
-        <Text style={styles.subtitle}>
-          This template sets up Expo and Tailwind (NativeWind) allowing you
-          to quickly get started with my YouTube tutorial!
-        </Text>
 
-        <Link href="https://www.youtube.com/@sonnysangha" target="_blank">
-          <Text className="text-lg text-center text-blue-500 underline">
-            https://www.youtube.com/@sonnysangha
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return "Today";
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday";
+    } else {
+      return date.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      });
+    }
+  };
+
+  const getTotalSets = (workout: GetWorkoutsQueryResult[number]) => {
+    return (
+      workout.exercises?.reduce((total, exercise) => {
+        return total + (exercise.sets?.length || 0);
+      }, 0) || 0
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView className="flex-1 bg-gray-50">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" color="#3B82F6" />
+          <Text className="text-gray-600 mt-4">
+            Loading your stats...
           </Text>
-        </Link>
-
-        <View style={styles.buttonsWrapper}>
-          <Link
-            suppressHighlighting
-            className="flex h-9 items-center justify-center overflow-hidden rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-gray-50"
-            href="https://www.youtube.com/@sonnysangha"
-          >
-            Visit my YouTube Channel
-          </Link>
-
-          <Link
-            suppressHighlighting
-            className="flex h-9 items-center justify-center overflow-hidden rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-gray-50"
-            href="https://www.papareact.com/course"
-          >
-            Get the Complete Source Code (Plus 60+ builds) ❤️
-          </Link>
-
-          <Link
-            suppressHighlighting
-            className="flex h-9 items-center justify-center overflow-hidden rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-gray-50"
-            href="https://www.papareact.com/course"
-          >
-            Join My Course & Learn to Code with AI 💚 (1000+ Students)
-          </Link>
         </View>
+      </SafeAreaView>
+    );
+  }
 
-      </View>
-    </View>
-  );
-}
-
-function Header() {
   return (
-    <View>
-      <View className="px-4 lg:px-6 h-14 flex items-center flex-row justify-between">
-        <Link className="font-bold flex-1 items-center justify-center" href="/">
-          PAPAFAM
-        </Link>
-        <View>
-          <Link
-            className="text-md font-medium hover:underline web:underline-offset-4"
-            href="https://www.papareact.com/course"
-          >
-            Join My Course ❤️
-          </Link>
+    <SafeAreaView className='flex-1 bg-gray-50'>
+      <StatusBar barStyle='dark-content' />
+      <ScrollView
+        className="flex-1"
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Header */}
+        <View className="px-6 pt-8 pb-6">
+          <Text className="text-lg text-gray-600">
+            Welcome back,
+          </Text>
+          <Text className="text-3xl font-bold text-gray-900">
+            {user?.firstName || "Athlete"}! 💪
+          </Text>
         </View>
-      </View>
-    </View>
-  );
-}
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-  },
-  contentWrapper: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 48,
-  },
-  contentInner: {
-    alignItems: 'center',
-    gap: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    color: '#111827',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 16,
-    textAlign: 'center',
-    color: '#374151',
-    maxWidth: 340,
-    lineHeight: 24,
-  },
-  buttonsWrapper: {
-    gap: 12,
-    width: '100%',
-    alignItems: 'center',
-  },
-});
+        {/* Stats Overview */}
+        <View className="px-6 mb-6">
+          <View className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+            <Text className="text-lg font-semibold text-gray-900 mb-4">
+              Your Stats
+            </Text>
+
+            <View className="flex-row justify-between">
+
+              {/* Total Workouts */}
+              <View className="items-center flex-1">
+                <Text className="text-2xl font-bold text-blue-600">
+                  {totalWorkouts}
+                </Text>
+                <Text className="text-sm text-gray-600 text-center">
+                  Total{"\n"}Workouts
+                </Text>
+              </View>
+
+              {/* Total Time */}
+              <View className="items-center flex-1">
+                <Text className="text-2xl font-bold text-green-600">
+                  {formatDuration(totalDuration)}
+                </Text>
+                <Text className="text-sm text-gray-600 text-center">
+                  Total{"\n"}Time
+                </Text>
+              </View>
+
+              {/* Average Duration */}
+              <View className="items-center flex-1">
+                <Text className="text-2xl font-bold text-purple-600">
+                  {averageDuration > 0
+                    ? formatDuration(averageDuration)
+                    : "0m"}
+                </Text>
+                <Text className="text-sm text-gray-600 text-center">
+                  Average{"\n"}Duration
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View className="px-6 mb-6">
+          <Text className="text-lg font-semibold text-gray-900 mb-4">
+            Quick Actions
+          </Text>
+
+          {/* Start Workout Button */}
+          <TouchableOpacity
+            onPress={() => router.push("/active-workout")}
+            className="bg-blue-600 rounded-2xl p-6 mb-4 shadow-sm"
+            activeOpacity={0.8}
+          >
+            <View className="flex-row items-center justify-between">
+
+              <View className="flex-row items-center flex-1">
+
+                <View className="w-12 h-12 bg-blue-500 rounded-full items-center justify-center mr-4">
+                  <Ionicons name="play" size={24} color="white" />
+                </View>
+
+                <View>
+                  <Text className="text-white text-xl font-semibold">
+                    Start Workout
+                  </Text>
+                  <Text className="text-blue-100">
+                    Begin your training session
+                  </Text>
+                </View>
+
+              </View>
+
+              <Ionicons name="chevron-forward" size={24} color="white" />
+
+            </View>
+          </TouchableOpacity>
+
+          {/* Action Grid */}
+          <View className="flex-row gap-4">
+            <TouchableOpacity
+              onPress={() => router.push("/history")}
+              className="bg-white rounded-2xl p-4 flex-1 shadow-sm border border-gray-100"
+              activeOpacity={0.7}
+            >
+              <View className="items-center">
+
+                <View className="w-12 h-12 bg-gray-100 rounded-full items-center justify-center mb-3">
+                  <Ionicons name="time-outline" size={24} color="#6B7280" />
+                </View>
+
+                <Text className="text-gray-900 font-medium text-center">
+                  Workout{"\n"}History
+                </Text>
+
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => router.push("/exercises")}
+              className="bg-white rounded-2xl p-4 flex-1 shadow-sm border border-gray-100"
+              activeOpacity={0.7}
+            >
+              <View className="items-center">
+
+                <View className="w-12 h-12 bg-gray-100 rounded-full items-center justify-center mb-3">
+                  <Ionicons name="barbell-outline" size={24} color="#6B7280" />
+                </View>
+
+                <Text className="text-gray-900 font-medium text-center">
+                  Browse{"\n"}Exercises
+                </Text>
+
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Last Workout */}
+        {lastWorkout && (
+          <View className="px-6 mb-8">
+            <Text className="text-lg font-semibold text-gray-900 mb-4">
+              Last Workout
+            </Text>
+
+            <TouchableOpacity
+              className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100"
+              onPress={() => {
+                router.push({
+                  pathname: "/history/workout-record",
+                  params: { workoutId: lastWorkout._id },
+                });
+              }}
+              activeOpacity={0.7}
+            >
+              <View className="flex-row items-center justify-between mb-4">
+
+                <View>
+                  <Text className="text-lg font-semibold text-gray-900">
+                    {formatDate(lastWorkout.date || "")}
+                  </Text>
+
+                  <View className="flex-row items-center mt-1">
+                    <Ionicons name="time-outline" size={16} color="#6B7280" />
+                    <Text className="text-gray-600 ml-2">
+                      {lastWorkout.duration
+                        ? formatDuration(lastWorkout.duration)
+                        : "Duration not recorded"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View className="bg-blue-100 rounded-full w-12 h-12 items-center justify-center">
+                  <Ionicons name="fitness-outline" size={24} color="#3B82F6" />
+                </View>
+
+              </View>
+
+              <View className="flex-row items-center justify-between">
+                <Text className="text-gray-600">
+                  {lastWorkout.exercises?.length || 0} exercises •{" "}
+                  {getTotalSets(lastWorkout)} sets
+                </Text>
+                <Ionicons name="chevron-forward" size={20} color="#6B7280" />
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Empty State for No Workouts */}
+        {totalWorkouts === 0 && (
+          <View className="px-6 mb-8">
+            <View className="bg-white rounded-2xl p-8 items-center shadow-sm border border-gray-100">
+
+              <View className="w-16 h-16 bg-blue-100 rounded-full items-center justify-center mb-4">
+                <Ionicons name="barbell-outline" size={32} color="#3B82F6" />
+              </View>
+
+              <Text className="text-xl font-semibold text-gray-900 mb-2">
+                Ready to start your fitness journey?
+              </Text>
+
+              <Text className="text-gray-600 text-center mb-4">
+                Track your workouts and see your progress over time
+              </Text>
+
+              <TouchableOpacity
+                onPress={() => router.push("/workout")}
+                className="bg-blue-600 rounded-xl px-6 py-3"
+                activeOpacity={0.8}
+              >
+                <Text className="text-white font-semibold">
+                  Start Your First Workout
+                </Text>
+              </TouchableOpacity>
+
+            </View>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  )
+}

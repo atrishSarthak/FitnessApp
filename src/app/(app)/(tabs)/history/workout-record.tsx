@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { useEffect } from 'react'
 import { client } from '@/lib/sanity/client'
 import { GetWorkoutRecordQueryResult } from '@/lib/sanity/types'
-import { formatDuration } from "../../../../../lib/utils";
+import { formatDuration } from "@/lib/utils";
 import { GetWorkoutsQueryResult } from "@/lib/sanity/types";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
