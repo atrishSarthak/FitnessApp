@@ -21,10 +21,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export const exercisesQuery = defineQuery(`*[_type == "exercise" && isActive == true] | order(name asc) {
   _id,
   name,
-  description,
+  bodyPart,
+  equipment,
+  primaryMuscles,
   difficulty,
-  "imageUrl": image.asset->url,
-  videoUrl
+  "imageUrl": image.asset->url
 }`);
 
 function Exercises() {

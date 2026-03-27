@@ -1,17 +1,34 @@
-import { View, Text, StatusBar, TouchableOpacity, ScrollView, Image, ActivityIndicator, Linking } from "react-native";
-import Markdown from "react-native-markdown-display";
-import React, { useEffect, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+  View,
+  Text,
+  StatusBar,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+  Dimensions,
+  BackHandler,
+} from 'react-native';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { client } from "@/lib/sanity/client";
-import { defineQuery } from "groq";
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { client } from '@/lib/sanity/client';
+import { defineQuery } from 'groq';
+import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const singleExerciseQuery = defineQuery(
   `*[_type == "exercise" && _id == $id][0] {
     _id,
+    exerciseId,
     name,
-    description,
+    instructions,
+    primaryMuscles,
+    secondaryMuscles,
+    bodyPart,
+    equipment,
     difficulty,
     "imageUrl": image.asset->url,
     videoUrl,
@@ -19,53 +36,85 @@ const singleExerciseQuery = defineQuery(
   }`
 );
 
-const getDifficultyColor = (difficulty: string) => {
-  switch (difficulty) {
-    case "beginner":
-      return "bg-green-500";
-    case "intermediate":
-      return "bg-yellow-500";
-    case "advanced":
-      return "bg-red-500";
-    default:
-      return "bg-gray-500";
-  }
-};
+// Query for analytics data (last 90 days)
+const analyticsQuery = defineQuery(
+  `*[_type == "workoutRecord" && completedAt > $startDate && exercises[].exercise._ref == $exerciseId] {
+    _id,
+    completedAt,
+    exercises[exercise._ref == $exerciseId] {
+      sets[] {
+        weight,
+        reps,
+        completed
+      }
+    }
+  }`
+);
 
-const getDifficultyText = (difficulty: string) => {
-  switch (difficulty) {
-    case "beginner":
-      return "Beginner";
-    case "intermediate":
-      return "Intermediate";
-    case "advanced":
-      return "Advanced";
-    default:
-      return "Unknown";
-  }
-};
-
+type Tab = 'TARGET' | 'INSTRUCTIONS' | 'EQUIPMENT' | 'ANALYTICS';
 
 export default function ExerciseDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const insets = useSafeAreaInsets();
 
   const [exercise, setExercise] = useState<any>(null);
-  const [aiGuidance, setAiGuidance] = useState<string | null>(null);
-  const [aiLoading, setAiLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<Tab>('TARGET');
+  const [analytics, setAnalytics] = useState<any>(null);
+  const isNavigatingBack = useRef(false);
+
+  const IMAGE_HEIGHT = SCREEN_HEIGHT * 0.42;
+  
+  const buttonBottomY = insets.top + 12 + 44 + 16;
+  const topSnapPoint = SCREEN_HEIGHT - buttonBottomY;
+  
+  const snapPoints = useMemo(() => [SCREEN_HEIGHT * 0.58, topSnapPoint], [topSnapPoint]);
+
+  // Reset navigation flag on mount
+  useEffect(() => {
+    isNavigatingBack.current = false;
+  }, []);
+
+  // Handle sheet close when dragged below initial position
+  const handleSheetChanges = useCallback((index: number) => {
+    if (index === -1) {
+      router.dismiss();
+    }
+  }, [router]);
+
+  // Prevent hardware back button from closing the screen via sheet
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Return false to allow default back behavior (handled by back button only)
+      return false;
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     const fetchExercise = async () => {
       if (!id) return;
 
-
       try {
         const data = await client.fetch(singleExerciseQuery, { id });
-        console.log('Fetched exercise:', data);
         setExercise(data);
+
+        // Fetch analytics data
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        
+        const analyticsData = await client.fetch(analyticsQuery, {
+          exerciseId: id,
+          startDate: ninetyDaysAgo.toISOString(),
+        });
+
+        // Calculate analytics
+        const calculatedAnalytics = calculateAnalytics(analyticsData);
+        setAnalytics(calculatedAnalytics);
       } catch (error) {
-        console.error("Error fetching exercise:", error);
+        console.error('Error fetching exercise:', error);
       } finally {
         setLoading(false);
       }
@@ -73,241 +122,660 @@ export default function ExerciseDetail() {
     fetchExercise();
   }, [id]);
 
-  const getAiGuidance = async () => {
-    if (!exercise) return;
-
-    setAiLoading(true);
-    try {
-      const response = await fetch("/api/ai", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          exerciseName: exercise.name,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to fetch AI guidance");
-      }
-
-      const data = await response.json();
-      setAiGuidance(data.message);
-    } catch (error) {
-      console.error("Error fetching AI guidance:", error);
-      setAiGuidance(
-        "Sorry, there was an error getting AI guidance. Please try again."
-      );
-    } finally {
-      setAiLoading(false);
+  const calculateAnalytics = (data: any[]) => {
+    if (!data || data.length === 0) {
+      return {
+        bestWeight: 0,
+        bestReps: 0,
+        bestDate: null,
+        totalVolume: 0,
+        totalTimes: 0,
+        totalSets: 0,
+      };
     }
-  };
 
+    let bestWeight = 0;
+    let bestReps = 0;
+    let bestDate = null;
+    let totalVolume = 0;
+    let totalSets = 0;
+
+    data.forEach((record) => {
+      record.exercises?.forEach((ex: any) => {
+        ex.sets?.forEach((set: any) => {
+          if (set.completed) {
+            totalSets++;
+            totalVolume += (set.weight || 0) * (set.reps || 0);
+            
+            if (set.weight > bestWeight) {
+              bestWeight = set.weight;
+              bestReps = set.reps;
+              bestDate = record.completedAt;
+            }
+          }
+        });
+      });
+    });
+
+    return {
+      bestWeight,
+      bestReps,
+      bestDate,
+      totalVolume,
+      totalTimes: data.length,
+      totalSets,
+    };
+  };
 
   if (loading) {
     return (
-      <SafeAreaView className="flex-1 bg-white">
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#3B82F6" />
-          <Text className="text-gray-600">Loading exercise...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={{ flex: 1, backgroundColor: 'white', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#FF6B35" />
+        <Text style={{ color: '#6B7280', marginTop: 16 }}>Loading exercise...</Text>
+      </View>
     );
   }
 
   if (!exercise) {
     return (
-      <SafeAreaView className="flex-1 bg-white">
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-gray-600">Exercise not found</Text>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text className="text-gray-600">Go back</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      <View style={{ flex: 1, backgroundColor: 'white', alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: '#6B7280' }}>Exercise not found</Text>
+        <TouchableOpacity onPress={() => router.dismiss()} style={{ marginTop: 16 }}>
+          <Text style={{ color: '#FF6B35' }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white" edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={{ flex: 1, backgroundColor: 'white' }}>
+        <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
-      {/* Header with close button */}
-      <View className="absolute top-12 left-0 right-0 z-10 px-4">
-        <TouchableOpacity
-          onPress={() => router.back()}
-          className="w-10 h-10 bg-black/50 rounded-full items-center justify-center"
-        >
-          <Ionicons name="close" size={24} color="white" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView className="flex-1" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingTop: 16 }}>
-        {/* Hero Image */}
-        <View style={{ height: 320 }}>
+        {/* Background Layer - GIF fills top 42% */}
+        <View style={{ height: IMAGE_HEIGHT, backgroundColor: '#FFFFFF', paddingTop: insets.top }}>
           {exercise?.imageUrl ? (
             <Image
               source={{ uri: exercise.imageUrl }}
-              style={{ width: '100%', height: 320 }}
-              resizeMode="cover"
-              onLoad={() => console.log('✅ Image loaded')}
+              style={{ width: '100%', height: '100%' }}
+              resizeMode="contain"
             />
           ) : (
-            <View className="w-full h-full bg-gradient-to-br from-blue-400 to-purple-500 items-center justify-center">
-              <Ionicons name="fitness" size={80} color="white" />
+            <View style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="fitness" size={80} color="#D1D5DB" />
             </View>
           )}
-
-          {/* Gradient overlay */}
-          <View className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/60 to-transparent" />
         </View>
 
+        {/* Header Buttons - Absolutely positioned from top edge */}
+        <View 
+          style={{ 
+            position: 'absolute',
+            top: insets.top + 12,
+            left: 0,
+            right: 0,
+            zIndex: 20,
+            paddingHorizontal: 16,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+          }}
+        >
+          <TouchableOpacity
+            onPress={() => router.dismiss()}
+            style={{
+              width: 44,
+              height: 44,
+              backgroundColor: '#0A1628',
+              borderRadius: 22,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.3,
+              shadowRadius: 4,
+              elevation: 5,
+            }}
+          >
+            <Ionicons name="chevron-back" size={24} color="white" />
+          </TouchableOpacity>
 
-        {/* Content */}
-        <View className="px-6 py-6 bg-white">
-          {/* Title and difficulty */}
-          <View className="flex-row items-start justify-between mb-4">
-            <View className="flex-1 mr-4">
-              <Text className="text-3xl font-bold text-gray-800 mb-2">
-                {exercise.name}
-              </Text>
-            </View>
+          <TouchableOpacity
+            style={{
+              width: 44,
+              height: 44,
+              backgroundColor: '#0A1628',
+              borderRadius: 22,
+              alignItems: 'center',
+              justifyContent: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.3,
+              shadowRadius: 4,
+              elevation: 5,
+            }}
+          >
+            <Ionicons name="star-outline" size={24} color="white" />
+          </TouchableOpacity>
+        </View>
 
-            <View
-              className={`self-start px-4 py-2 rounded-full ${getDifficultyColor(
-                exercise.difficulty
-              )}`}
-            >
-              <Text className="text-sm font-semibold text-white">
-                {getDifficultyText(exercise.difficulty)}
-              </Text>
-            </View>
-          </View>
-
-          {/* Description */}
-          <View className="mb-6">
-            <Text className="text-lg font-semibold text-gray-800 mb-3">
-              Description
-            </Text>
-
-            <Text className="text-gray-600 leading-relaxed">
-              {exercise.description || "No description available"}
-            </Text>
-          </View>
-
-          {/* Video Section */}
-          {exercise.videoUrl && (
-            <View className="mb-6">
-              <Text className="text-lg font-semibold text-gray-800 mb-3">
-                Tutorial Video
-              </Text>
-              <TouchableOpacity
-                className="bg-red-500 rounded-xl p-4 flex-row items-center"
-                onPress={() => Linking.openURL(exercise.videoUrl)}
-              >
-                <View className="w-12 h-12 bg-white rounded-full items-center justify-center mr-4">
-                  <Ionicons name="play" size={20} color="#EF4444" />
-                </View>
-
-                <View>
-                  <Text className="text-white font-semibold text-lg">
-                    Watch Tutorial
-                  </Text>
-                  <Text className="text-red-100 text-sm">
-                    Learn proper form
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* TODO:  AI Guidance */}
-          {(aiGuidance || aiLoading) && (
-            <View className="mb-6">
-              <View className="flex-row items-center mb-3">
-                <Ionicons name="fitness" size={24} color="#3B82F6" />
-                <Text className="text-xl font-semibold text-gray-800 ml-2">
-                  AI Coach Says.....
-                </Text>
-              </View>
-
-              {aiLoading ? (
-                <View className="bg-gray-50 rounded-xl p-4 items-center">
-                  <ActivityIndicator size="small" color="#3B82F6" />
-                  <Text className="text-gray-600 mt-2">
-                    Getting personalized guidance...
-                  </Text>
-                </View>
-              ) : (
-                <View className="bg-blue-50 rounded-xl p-4 border-l-4 border-blue-500">
-                  <Markdown
+        {/* Bottom Sheet */}
+        <BottomSheet
+          ref={bottomSheetRef}
+          index={0}
+          snapPoints={snapPoints}
+          enablePanDownToClose={true}
+          enableDynamicSizing={false}
+          animateOnMount={true}
+          onAnimate={(fromIndex, toIndex) => {
+            if (toIndex === -1 && !isNavigatingBack.current) {
+              isNavigatingBack.current = true;
+              router.dismiss();
+            }
+          }}
+          onChange={(index) => {
+            if (index === -1 && !isNavigatingBack.current) {
+              isNavigatingBack.current = true;
+              router.dismiss();
+            }
+          }}
+          onClose={() => {
+            if (!isNavigatingBack.current) {
+              isNavigatingBack.current = true;
+              router.dismiss();
+            }
+          }}
+          backgroundStyle={{
+            backgroundColor: '#0D2318',
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
+          }}
+          handleIndicatorStyle={{
+            backgroundColor: 'rgba(255,255,255,0.3)',
+            width: 36,
+            height: 4,
+          }}
+        >
+          <BottomSheetScrollView
+            style={{ flex: 1, paddingHorizontal: 24 }}
+            contentContainerStyle={{
+              paddingTop: 16,
+              paddingBottom: 48,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Badges Row */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+              {exercise.bodyPart && (
+                <View
+                  style={{
+                    backgroundColor: 'rgba(255,255,255,0.12)',
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                    borderRadius: 20,
+                    marginRight: 8,
+                  }}
+                >
+                  <Text
                     style={{
-                      body: {
-                        paddingBottom: 20,
-                      },
-                      heading2: {
-                        fontSize: 18,
-                        fontWeight: "bold",
-                        color: "#1f2937",
-                        marginTop: 12,
-                        marginBottom: 6,
-                      },
-                      heading3: {
-                        fontSize: 16,
-                        fontWeight: "600",
-                        color: "#374151",
-                        marginTop: 8,
-                        marginBottom: 4,
-                      },
+                      color: 'white',
+                      fontSize: 11,
+                      fontWeight: '600',
+                      letterSpacing: 1,
+                      textTransform: 'uppercase',
                     }}
                   >
-                    {aiGuidance}
-                  </Markdown>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Action Buttons */}
-          <View className="mt-8 gap-2">
-            {/* AI Coach Button */}
-            <TouchableOpacity
-              className={`rounded-xl py-4 items-center ${aiLoading
-                ? "bg-gray-400"
-                : aiGuidance
-                  ? "bg-green-500"
-                  : "bg-blue-500"
-                }`}
-              onPress={getAiGuidance}
-              disabled={aiLoading}
-            >
-              {aiLoading ? (
-                <View className="flex-row items-center">
-                  <ActivityIndicator size="small" color="white" />
-                  <Text className="text-white font-bold text-lg ml-2">
-                    Loading...
+                    {exercise.bodyPart}
                   </Text>
                 </View>
-              ) : (
-                <Text className="text-white font-bold text-lg">
-                  {aiGuidance
-                    ? "Refresh AI Guidance"
-                    : "Get AI Guidance on Form & Technique"}
-                </Text>
               )}
-            </TouchableOpacity>
+              <View
+                style={{
+                  backgroundColor: '#2D6A4F',
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  borderRadius: 20,
+                }}
+              >
+                <Text
+                  style={{
+                    color: 'white',
+                    fontSize: 11,
+                    fontWeight: '600',
+                    letterSpacing: 1,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  TRENDING
+                </Text>
+              </View>
+            </View>
 
-            <TouchableOpacity
-              className="bg-gray-200 rounded-xl py-4 items-center"
-              onPress={() => router.back()}
+            {/* Exercise Name */}
+            <Text
+              style={{
+                fontSize: 32,
+                fontWeight: '700',
+                color: 'white',
+                marginTop: 10,
+                marginBottom: 20,
+                lineHeight: 38,
+              }}
             >
-              <Text className="text-gray-800 font-bold text-lg">Close</Text>
-            </TouchableOpacity>
+              {exercise.name}
+            </Text>
 
+            {/* Tab Bar */}
+            <View
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.08)',
+                borderRadius: 50,
+                padding: 4,
+                flexDirection: 'row',
+                paddingHorizontal: 2,
+                marginBottom: 24,
+              }}
+            >
+              {(['TARGET', 'INSTRUCTIONS', 'EQUIPMENT', 'ANALYTICS'] as Tab[]).map((tab) => (
+                <TouchableOpacity
+                  key={tab}
+                  onPress={() => setActiveTab(tab)}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    paddingHorizontal: 4,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: activeTab === tab ? '#1A3D2E' : 'transparent',
+                    borderRadius: 50,
+                  }}
+                >
+                  <Text
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={true}
+                    minimumFontScale={0.7}
+                    style={{
+                      fontSize: 10,
+                      fontWeight: '600',
+                      letterSpacing: 0.5,
+                      color: 'white',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {tab}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Tab Content */}
+            <View style={{ minHeight: SCREEN_HEIGHT * 0.6 }}>
+              {activeTab === 'TARGET' && <TargetTab exercise={exercise} />}
+              {activeTab === 'INSTRUCTIONS' && <InstructionsTab exercise={exercise} />}
+              {activeTab === 'EQUIPMENT' && <EquipmentTab exercise={exercise} />}
+              {activeTab === 'ANALYTICS' && <AnalyticsTab analytics={analytics} />}
+            </View>
+
+            {/* Bottom padding for scroll */}
+            <View style={{ height: 48 }} />
+          </BottomSheetScrollView>
+        </BottomSheet>
+      </View>
+    </GestureHandlerRootView>
+  );
+}
+
+// TARGET Tab Component
+function TargetTab({ exercise }: { exercise: any }) {
+  return (
+    <View>
+      {/* PRIMARY Section */}
+      {exercise.primaryMuscles && exercise.primaryMuscles.length > 0 && (
+        <View style={{ marginBottom: 24 }}>
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: '600',
+              color: 'rgba(255,255,255,0.5)',
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              marginBottom: 12,
+              marginTop: 20,
+            }}
+          >
+            PRIMARY
+          </Text>
+          {exercise.primaryMuscles.map((muscle: string, index: number) => (
+            <View key={index}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 14,
+                  gap: 16,
+                }}
+              >
+                <View
+                  style={{
+                    width: 44,
+                    height: 44,
+                    backgroundColor: '#FF6B35',
+                    borderRadius: 8,
+                  }}
+                />
+                <Text
+                  style={{
+                    color: 'white',
+                    fontSize: 16,
+                    fontWeight: '500',
+                    textTransform: 'capitalize',
+                    flex: 1,
+                  }}
+                >
+                  {muscle}
+                </Text>
+              </View>
+              {index < exercise.primaryMuscles.length - 1 && (
+                <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* SECONDARY Section */}
+      {exercise.secondaryMuscles && exercise.secondaryMuscles.length > 0 && (
+        <View>
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: '600',
+              color: 'rgba(255,255,255,0.5)',
+              letterSpacing: 1.5,
+              textTransform: 'uppercase',
+              marginBottom: 12,
+              marginTop: 20,
+            }}
+          >
+            SECONDARY
+          </Text>
+          {exercise.secondaryMuscles.map((muscle: string, index: number) => (
+            <View key={index}>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingVertical: 14,
+                  gap: 16,
+                }}
+              >
+                <View
+                  style={{
+                    width: 44,
+                    height: 44,
+                    backgroundColor: '#4A5568',
+                    borderRadius: 8,
+                  }}
+                />
+                <Text
+                  style={{
+                    color: 'white',
+                    fontSize: 16,
+                    fontWeight: '500',
+                    textTransform: 'capitalize',
+                    flex: 1,
+                  }}
+                >
+                  {muscle}
+                </Text>
+              </View>
+              {index < exercise.secondaryMuscles.length - 1 && (
+                <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// INSTRUCTIONS Tab Component
+function InstructionsTab({ exercise }: { exercise: any }) {
+  if (!exercise.instructions || exercise.instructions.length === 0) {
+    return (
+      <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+        <Text style={{ color: 'rgba(255,255,255,0.5)' }}>No instructions available</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ marginTop: 8 }}>
+      {exercise.instructions.map((instruction: string, index: number) => (
+        <View key={index}>
+          <View style={{ flexDirection: 'row', paddingVertical: 16, gap: 16 }}>
+            <Text
+              style={{
+                color: 'rgba(255,255,255,0.4)',
+                fontSize: 24,
+                fontWeight: '700',
+                width: 32,
+              }}
+            >
+              {index + 1}
+            </Text>
+            <Text
+              style={{
+                color: 'white',
+                fontSize: 15,
+                fontWeight: '400',
+                flex: 1,
+                lineHeight: 22,
+              }}
+            >
+              {instruction}
+            </Text>
+          </View>
+          {index < exercise.instructions.length - 1 && (
+            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// EQUIPMENT Tab Component
+function EquipmentTab({ exercise }: { exercise: any }) {
+  if (!exercise.equipment || exercise.equipment.length === 0) {
+    return (
+      <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+        <Text style={{ color: 'rgba(255,255,255,0.5)' }}>No equipment required</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={{ marginTop: 8 }}>
+      {exercise.equipment.map((item: string, index: number) => (
+        <View key={index}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 16 }}>
+            <View
+              style={{
+                width: 80,
+                height: 80,
+                backgroundColor: 'white',
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: 'rgba(255,255,255,0.1)',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 40 }}>🏋️</Text>
+            </View>
+            <Text
+              style={{
+                color: 'white',
+                fontSize: 16,
+                fontWeight: '500',
+                textTransform: 'capitalize',
+                flex: 1,
+              }}
+            >
+              {item}
+            </Text>
+          </View>
+          {index < exercise.equipment.length - 1 && (
+            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ANALYTICS Tab Component
+function AnalyticsTab({ analytics }: { analytics: any }) {
+  if (!analytics) {
+    return (
+      <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+        <ActivityIndicator size="small" color="#FF6B35" />
+      </View>
+    );
+  }
+
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
+
+  return (
+    <View>
+      {/* Header */}
+      <Text
+        style={{
+          fontSize: 11,
+          fontWeight: '600',
+          color: 'rgba(255,255,255,0.5)',
+          letterSpacing: 1.5,
+          textTransform: 'uppercase',
+          marginBottom: 16,
+        }}
+      >
+        IN THE LAST 90 DAYS
+      </Text>
+
+      {/* RECORDS Card */}
+      <View
+        style={{
+          backgroundColor: '#1A2F2F',
+          borderRadius: 16,
+          padding: 16,
+          marginBottom: 16,
+        }}
+      >
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+          RECORDS
+        </Text>
+
+        {/* Dropdown (UI only) */}
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 16,
+            paddingBottom: 12,
+            borderBottomWidth: 1,
+            borderBottomColor: 'rgba(255,255,255,0.1)',
+          }}
+        >
+          <Text style={{ color: '#D1D5DB', fontSize: 14 }}>Best Weight</Text>
+          <Ionicons name="chevron-down" size={20} color="#9CA3AF" />
+        </View>
+
+        {/* Value Display */}
+        <Text style={{ color: '#FF6B35', fontSize: 36, fontWeight: '700', marginBottom: 4 }}>
+          {analytics.bestWeight}kg
+        </Text>
+        <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 16 }}>
+          {analytics.bestReps} reps • {formatDate(analytics.bestDate)}
+        </Text>
+
+        {/* Chart Placeholder */}
+        <View
+          style={{
+            height: 160,
+            backgroundColor: '#0D2318',
+            borderRadius: 8,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ color: 'rgba(255,255,255,0.3)', fontSize: 14 }}>Chart coming soon</Text>
+        </View>
+      </View>
+
+      {/* MORE INFORMATIONS Card */}
+      <View
+        style={{
+          backgroundColor: '#1A2F2F',
+          borderRadius: 16,
+          padding: 16,
+        }}
+      >
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700', marginBottom: 12 }}>
+          MORE INFORMATIONS
+        </Text>
+
+        <View>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: '#D1D5DB', fontSize: 15 }}>Total volume</Text>
+            <Text style={{ color: '#FF6B35', fontSize: 15, fontWeight: '600' }}>
+              {analytics.totalVolume}kg
+            </Text>
+          </View>
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: '#D1D5DB', fontSize: 15 }}>Total Times</Text>
+            <Text style={{ color: '#FF6B35', fontSize: 15, fontWeight: '600' }}>
+              {analytics.totalTimes}
+            </Text>
+          </View>
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingVertical: 12,
+            }}
+          >
+            <Text style={{ color: '#D1D5DB', fontSize: 15 }}>Total sets</Text>
+            <Text style={{ color: '#FF6B35', fontSize: 15, fontWeight: '600' }}>
+              {analytics.totalSets}
+            </Text>
           </View>
         </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </View>
   );
 }

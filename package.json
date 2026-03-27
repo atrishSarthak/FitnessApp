@@ -7,12 +7,14 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "deploy": "npx expo export -p web && npx eas-cli@latest deploy"
+    "deploy": "npx expo export -p web && npx eas-cli@latest deploy",
+    "seed:exercises": "ts-node --project tsconfig.scripts.json scripts/seed-exercises.ts"
   },
   "dependencies": {
     "@clerk/expo": "^3.1.2",
     "@expo/vector-icons": "^15.0.3",
     "@google/generative-ai": "^0.24.1",
+    "@gorhom/bottom-sheet": "^5.2.8",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@sanity/client": "^7.17.0",
     "@sanity/image-url": "^2.0.3",
@@ -45,7 +47,12 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
+    "@types/node": "^22.19.15",
+    "@types/node-fetch": "^2.6.13",
     "@types/react": "~19.1.10",
+    "dotenv": "^16.6.1",
+    "node-fetch": "^2.7.0",
+    "ts-node": "^10.9.2",
     "typescript": "~5.9.2"
   },
   "private": true

@@ -20,9 +20,13 @@ function Layout() {
         <Stack.Screen
           name="exercise-detail"
           options={{
-            presentation: 'modal',
+            presentation: 'card',
+            animation: 'none',
             gestureEnabled: true,
-            gestureDirection: 'vertical',
+            gestureDirection: 'horizontal',
+            contentStyle: { backgroundColor: '#FFFFFF' },
+            statusBarTranslucent: true,
+            statusBarColor: 'transparent',
           }}
         />
       </Stack.Protected>

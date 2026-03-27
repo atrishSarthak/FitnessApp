@@ -1,0 +1,12 @@
+
+> fit-app@1.0.0 seed:exercises
+> ts-node --project tsconfig.scripts.json scripts/seed-exercises.ts
+
+🚀 Starting exercise seed script...
+
+🗑️  Wiping existing exercises...
+   Wiped 828 existing exercises
+
+📥 Fetching exercises from API...
+
+❌ Fatal error: API error: Bad Request

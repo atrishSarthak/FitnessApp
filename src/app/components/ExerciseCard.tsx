@@ -4,13 +4,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 const getDifficultyColor = (difficulty: string) => {
   switch (difficulty) {
     case "beginner":
-      return "bg-green-500";
+      return "#10B981"; // green
     case "intermediate":
-      return "bg-yellow-500";
+      return "#FF6B35"; // orange
     case "advanced":
-      return "bg-red-500";
+      return "#EF4444"; // red
     default:
-      return "bg-gray-500";
+      return "#6B7280"; // gray
   }
 };
 
@@ -27,77 +27,83 @@ const getDifficultyText = (difficulty: string) => {
   }
 };
 
-
 interface ExerciseCardProps {
   item: {
     _id: string;
     name: string;
-    description: string;
+    bodyPart?: string;
+    equipment?: string[];
     difficulty: string;
     imageUrl?: string;
-    videoUrl?: string;
   };
   onPress: () => void;
-  showChevron?: boolean;
 }
 
-export default function ExerciseCard({
-  item,
-  onPress,
-  showChevron = true,
-}: ExerciseCardProps) {
+export default function ExerciseCard({ item, onPress }: ExerciseCardProps) {
+  const difficultyColor = getDifficultyColor(item.difficulty);
+  
   return (
     <TouchableOpacity
-      className="bg-white rounded-2xl mb-4 shadow-sm border border-gray-100"
+      className="bg-[#0D1F1F] rounded-2xl mb-4 overflow-hidden"
       onPress={onPress}
+      activeOpacity={0.8}
     >
-
-      <View className="flex-row p-6">
-        <View className="w-20 h-20 bg-white rounded-xl mr-4 overflow-hidden">
-          {item.imageUrl ? (
-            <Image
-              source={{ uri: item.imageUrl }}
-              className="w-full h-full"
-              resizeMode="contain"
-            />
-          ) : (
-            <View className="w-full h-full bg-gradient-to-br from-blue-400 to-purple-500 items-center justify-center">
-              <Ionicons name="fitness" size={24} color="white" />
-            </View>
-          )}
-        </View>
-
-        <View className="flex-1 justify-between">
-          <View>
-            <Text className="text-lg font-bold text-gray-900 mb-1">
-              {item.name}
-            </Text>
-
-            <Text
-              className="text-sm text-gray-600 mb-2"
-              numberOfLines={2}
-            >
-              {item.description || "No description available"}
-            </Text>
+      {/* Image Section */}
+      <View className="w-full h-[200px] bg-white">
+        {item.imageUrl ? (
+          <Image
+            source={{ uri: item.imageUrl }}
+            className="w-full h-full"
+            resizeMode="contain"
+          />
+        ) : (
+          <View className="w-full h-full items-center justify-center">
+            <Ionicons name="fitness" size={48} color="#D1D5DB" />
           </View>
+        )}
+      </View>
 
-          <View className="flex-row items-center justify-between">
-            <View
-              className={`px-3 py-1 rounded-full ${getDifficultyColor(
-                item.difficulty
-              )}`}
-            >
-              <Text className="text-xs font-semibold text-white">
-                {getDifficultyText(item.difficulty)}
+      {/* Content Section */}
+      <View className="p-4">
+        {/* Body Part Badge */}
+        {item.bodyPart && (
+          <View className="self-start mb-2">
+            <View className="bg-[#1A2F2F] px-3 py-1 rounded-full">
+              <Text className="text-white text-xs font-semibold uppercase">
+                {item.bodyPart}
               </Text>
             </View>
-
-            {showChevron && (
-              <TouchableOpacity className='p-2'>
-                <Ionicons name="chevron-forward" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            )}
           </View>
+        )}
+
+        {/* Exercise Name */}
+        <Text className="text-white text-xl font-bold mb-2">
+          {item.name}
+        </Text>
+
+        {/* Equipment and Difficulty Row */}
+        <View className="flex-row items-center">
+          {/* Equipment */}
+          {item.equipment && item.equipment.length > 0 && (
+            <View className="flex-row items-center mr-3">
+              <Text className="text-gray-400 text-sm">
+                🏋️ {item.equipment[0]}
+              </Text>
+            </View>
+          )}
+
+          {/* Separator */}
+          {item.equipment && item.equipment.length > 0 && (
+            <Text className="text-gray-600 text-sm mr-3">•</Text>
+          )}
+
+          {/* Difficulty */}
+          <Text 
+            className="text-sm font-semibold"
+            style={{ color: difficultyColor }}
+          >
+            {getDifficultyText(item.difficulty)}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>

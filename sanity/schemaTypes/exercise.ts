@@ -7,19 +7,56 @@ export default defineType({
   description: 'Exercise definitions with details about difficulty, instructions, and media',
   fields: [
     defineField({
+      name: 'exerciseId',
+      title: 'Exercise ID',
+      type: 'string',
+      description: 'Unique external ID from the exercise database',
+      validation: (Rule) => Rule.required(),
+    }),
+    defineField({
       name: 'name',
       title: 'Exercise Name',
       type: 'string',
-      description: 'The name of the exercise (e.g., "Push-ups", "Squats")',
+      description: 'The name of the exercise (e.g., "Barbell Bench Press", "Squats")',
       validation: (Rule) => Rule.required().max(100),
     }),
     defineField({
-      name: 'description',
-      title: 'Description',
-      type: 'text',
-      description: 'Detailed description of how to perform the exercise, including form tips and common mistakes to avoid',
-      validation: (Rule) => Rule.required().max(500),
-      rows: 5,
+      name: 'instructions',
+      title: 'Instructions',
+      type: 'array',
+      of: [{ type: 'string' }],
+      description: 'Step-by-step instructions for performing the exercise',
+      validation: (Rule) => Rule.required().min(1),
+    }),
+    defineField({
+      name: 'primaryMuscles',
+      title: 'Primary Muscles',
+      type: 'array',
+      of: [{ type: 'string' }],
+      description: 'Primary muscles targeted by this exercise',
+      validation: (Rule) => Rule.required().min(1),
+    }),
+    defineField({
+      name: 'secondaryMuscles',
+      title: 'Secondary Muscles',
+      type: 'array',
+      of: [{ type: 'string' }],
+      description: 'Secondary muscles engaged during this exercise',
+    }),
+    defineField({
+      name: 'bodyPart',
+      title: 'Body Part',
+      type: 'string',
+      description: 'Main body part targeted (e.g., "chest", "back", "shoulders")',
+      validation: (Rule) => Rule.required(),
+    }),
+    defineField({
+      name: 'equipment',
+      title: 'Equipment',
+      type: 'array',
+      of: [{ type: 'string' }],
+      description: 'Equipment needed for this exercise',
+      validation: (Rule) => Rule.required().min(1),
     }),
     defineField({
       name: 'difficulty',
@@ -40,7 +77,7 @@ export default defineType({
       name: 'image',
       title: 'Exercise Image',
       type: 'image',
-      description: 'A visual representation of the exercise showing proper form',
+      description: 'A visual representation of the exercise showing proper form (GIF or image)',
       options: {
         hotspot: true,
       },
@@ -49,7 +86,7 @@ export default defineType({
           name: 'alt',
           type: 'string',
           title: 'Alt Text',
-          description: 'Remember to use alt text for people to be able to read what is happening in the image if they are using a screen reader, it\'s also important for SEO',
+          description: 'Alt text for accessibility',
           validation: (Rule) => Rule.required(),
         },
       ],
@@ -76,15 +113,16 @@ export default defineType({
   preview: {
     select: {
       title: 'name',
+      bodyPart: 'bodyPart',
       difficulty: 'difficulty',
       media: 'image',
       isActive: 'isActive',
     },
     prepare(selection) {
-      const { title, difficulty, media, isActive } = selection
+      const { title, bodyPart, difficulty, media, isActive } = selection
       return {
         title: title,
-        subtitle: `${difficulty ? difficulty.charAt(0).toUpperCase() + difficulty.slice(1) : 'No difficulty'} ${!isActive ? '(Inactive)' : ''}`,
+        subtitle: `${bodyPart ? bodyPart.toUpperCase() : ''} • ${difficulty ? difficulty.charAt(0).toUpperCase() + difficulty.slice(1) : 'No difficulty'} ${!isActive ? '(Inactive)' : ''}`,
         media: media,
       }
     },
